@@ -188,7 +188,7 @@ class SplinePlot(LinePlot):
         self.update_spline()
 
     def update_spline(self):
-        k = min(len(self.x)-1,3)
+        k = min(len(self.x)-1, 3)
         self.spline = interpolate.UnivariateSpline(self.x, self.y, k=k, s=100)
         self.spline_plt.set_data(self.spline_x, self.spline(self.spline_x))
 

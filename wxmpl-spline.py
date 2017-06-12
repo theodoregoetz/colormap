@@ -149,7 +149,7 @@ class ColorMap(object):
         self.npoints = npoints
         self.imdim = imdim
 
-        self._splines = [
+        self.splines = [
             BoundedSpline(npoints, self.x, self.colors[0], (0, 1, 0, 100)),
             BoundedSpline(npoints, self.x, self.colors[1], (0, 1, -128, 128)),
             BoundedSpline(npoints, self.x, self.colors[2], (0, 1, -128, 128))]
@@ -174,7 +174,7 @@ class ColorMap(object):
         self._imdata = np.empty((self.imdim[1], self.imdim[0], 3))
 
     def _update_uncorrected_colors(self, i):
-        self._colors_uncorr[..., i] = self._splines[i](self._xx)
+        self._colors_uncorr[..., i] = self.splines[i](self._xx)
 
     def _update_x_spline(self):
         if self.delta_e is None:
@@ -188,7 +188,7 @@ class ColorMap(object):
                                                           s=self.smoothing)
 
     def _update_corrected_colors(self):
-        for i, s in enumerate(self._splines):
+        for i, s in enumerate(self.splines):
             self._colors_corr[..., i] = s(self._x_spline(self._xx))
 
     def update_corrected_colors(self):
@@ -200,7 +200,7 @@ class ColorMap(object):
         self.update_corrected_colors()
 
     def rgb(self):
-        for i, s in enumerate(self._splines):
+        for i, s in enumerate(self.splines):
             self._cmap_colors[..., 0, i] = s(self._x_spline(self._cmap_x))
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -211,27 +211,25 @@ class ColorMap(object):
             warnings.simplefilter("ignore")
 
             self._imdata[:, :, 0] = self._ll
-            self._imdata[:, :, 1] = self._splines[1](self._x_spline(self._imx))
-            self._imdata[:, :, 2] = self._splines[2](self._x_spline(self._imx))
+            self._imdata[:, :, 1] = self.splines[1](self._x_spline(self._imx))
+            self._imdata[:, :, 2] = self.splines[2](self._x_spline(self._imx))
             yield color.lab2rgb(self._imdata)
 
-            self._imdata[:, :, 0] = self._splines[0](self._x_spline(self._imx))
+            self._imdata[:, :, 0] = self.splines[0](self._x_spline(self._imx))
             self._imdata[:, :, 1] = self._aa
             yield color.lab2rgb(self._imdata)
 
-            self._imdata[:, :, 1] = self._splines[1](self._x_spline(self._imx))
+            self._imdata[:, :, 1] = self.splines[1](self._x_spline(self._imx))
             self._imdata[:, :, 2] = self._bb
             yield color.lab2rgb(self._imdata)
 
 
 class SplinePlot(wx.Panel):
-    def __init__(self, parent, x, y, extent, xlabel=None, ylabel=None,
-                 spline_npoints=256):
+    def __init__(self, parent, spline, xlabel=None, ylabel=None):
         super().__init__(parent)
 
         self.parent = parent
-        self.spline = BoundedSpline(spline_npoints, x, y, extent)
-
+        self.spline = spline
         self.init_canvas(xlabel, ylabel)
         self.layout()
         self.connect()
@@ -334,7 +332,7 @@ class SplinePlot(wx.Panel):
         ipick, xpick, ypick = self.spline.pick(event.xdata, event.ydata)
         xpx, ypx = self.axes.transData.transform((xpick, ypick))
         distsq = (xpx - event.x)**2 + (ypx - event.y)**2
-        if distsq < 10**2:
+        if distsq < 15**2:
             return ipick
 
     def update(self):
@@ -343,20 +341,45 @@ class SplinePlot(wx.Panel):
         self.canvas.draw()
 
 
-class MainFrame(wx.Frame):
-    def __init__(self):
-        super().__init__(None, wx.ID_ANY, 'Main Window', size=(500, 250))
+class ColorMapControlPlots(wx.Panel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        colors = np.array(
+            [[ 12,   0,   0],
+             [ 57, -37,  -2],
+             [ 46, -32,  48],
+             [ 65,  25,  70],
+             [ 72,  18,  76],
+             [ 81,   0,   0],
+             [ 99,   0,   0]]).transpose()
+        x = np.linspace(0, 1, len(colors[0]))
+        self.cmap = ColorMap(x, colors)
 
-        extent = [0, 255, 0, 255]
-        x = [0,  50, 130, 185, 255]
-        y = [0, 150,  33, 210, 255]
+        self.plots = [
+            SplinePlot(self, self.cmap.splines[0], ylabel='lightness'),
+            SplinePlot(self, self.cmap.splines[1], ylabel='green-red'),
+            SplinePlot(self, self.cmap.splines[2], ylabel='blue-yellow')]
 
-        self.plot = SplinePlot(self, x, y, extent, ylabel='spline')
         self.layout()
 
     def layout(self):
         vbox = wx.BoxSizer(wx.VERTICAL)
-        vbox.Add(self.plot, 1, wx.ALL | wx.EXPAND)
+        vbox.Add(self.plots[0], 1, wx.ALL | wx.EXPAND)
+        vbox.Add(self.plots[1], 1, wx.ALL | wx.EXPAND)
+        vbox.Add(self.plots[2], 1, wx.ALL | wx.EXPAND)
+        self.SetSizer(vbox)
+        self.Layout()
+
+
+class MainFrame(wx.Frame):
+    def __init__(self):
+        super().__init__(None, wx.ID_ANY, 'Main Window', size=(500, 500))
+        self.cmapctl = ColorMapControlPlots(self)
+        self.layout()
+
+    def layout(self):
+        vbox = wx.BoxSizer(wx.VERTICAL)
+        vbox.Add(self.cmapctl, 1, wx.ALL | wx.EXPAND)
         self.SetSizer(vbox)
         self.Layout()
 

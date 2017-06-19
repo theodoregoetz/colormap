@@ -2,6 +2,7 @@ import matplotlib as mpl
 mpl.use('wxAgg')
 
 import numpy as np
+import warnings
 import wx
 
 from copy import copy
@@ -48,8 +49,10 @@ class OrderedBoundedPoints(object):
         self._reorder()
         return self._moved_index(i)
 
-    def add(self, x, y):
+    def add(self, x, y=None):
         self.x = np.concatenate([[self._clip_x(x)], self.x])
+        if y is None:
+            y = 0.5 * (self.ymin + self.ymax)
         self.y = np.concatenate([[self._clip_y(y)], self.y])
         self._redistribute()
         self._reorder()
@@ -171,7 +174,13 @@ class ColorMap(object):
         self._aa = np.linspace(-128, 128, self.imdim[1]).reshape((-1,1))
         self._bb = np.linspace(-128, 128, self.imdim[1]).reshape((-1,1))
         self._imx = np.linspace(0, 1, self.imdim[0])
-        self._imdata = np.empty((self.imdim[1], self.imdim[0], 3))
+        self._labdata = np.empty((3, self.imdim[1], self.imdim[0], 3))
+        self._rgbadata = np.empty((3, self.imdim[1], self.imdim[0], 4), dtype=np.uint8)
+        self._rgbadata[:, :, :, 3] = 0xff
+
+        self._labdata[0, :, :, 0] = self._ll
+        self._labdata[1, :, :, 1] = self._aa
+        self._labdata[2, :, :, 2] = self._bb
 
     def _update_uncorrected_colors(self, i):
         self._colors_uncorr[..., i] = self.splines[i](self._xx)
@@ -209,19 +218,24 @@ class ColorMap(object):
     def imdata(self):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
+            x = self._x_spline(self._imx)
+            l = self.splines[0](x)
+            a = self.splines[1](x)
+            b = self.splines[2](x)
 
-            self._imdata[:, :, 0] = self._ll
-            self._imdata[:, :, 1] = self.splines[1](self._x_spline(self._imx))
-            self._imdata[:, :, 2] = self.splines[2](self._x_spline(self._imx))
-            yield color.lab2rgb(self._imdata)
+            self._labdata[0, :, :, 1] = a
+            self._labdata[0, :, :, 2] = b
+            self._rgbadata[0, :, :, :-1] = (color.lab2rgb(self._labdata[0]) * 0xff).astype(np.uint8)
 
-            self._imdata[:, :, 0] = self.splines[0](self._x_spline(self._imx))
-            self._imdata[:, :, 1] = self._aa
-            yield color.lab2rgb(self._imdata)
+            self._labdata[1, :, :, 0] = l
+            self._labdata[1, :, :, 2] = b
+            self._rgbadata[1, :, :, :-1] = (color.lab2rgb(self._labdata[1]) * 0xff).astype(np.uint8)
 
-            self._imdata[:, :, 1] = self.splines[1](self._x_spline(self._imx))
-            self._imdata[:, :, 2] = self._bb
-            yield color.lab2rgb(self._imdata)
+            self._labdata[2, :, :, 0] = l
+            self._labdata[2, :, :, 1] = a
+            self._rgbadata[2, :, :, :-1] = (color.lab2rgb(self._labdata[2]) * 0xff).astype(np.uint8)
+
+            return self._rgbadata
 
 
 class SplinePlot(wx.Panel):
@@ -295,7 +309,7 @@ class SplinePlot(wx.Panel):
                 if idx is not None:
                     self.delete(idx)
 
-    def add(self, x, y):
+    def add(self, x, y=None):
         i = self.spline.add(x, y)
         if self._dragging:
             self._index = i
@@ -312,12 +326,13 @@ class SplinePlot(wx.Panel):
                     x, y = event.xdata, event.ydata
                 else:
                     x, y = self.axes.transData.inverted().transform((event.x, event.y))
+                ret = self._index, x, y
                 self._index = self.spline.move(self._index, x, y)
                 self.update()
+                return ret
 
     def on_button_release(self, event):
         if self._dragging:
-            self.on_motion_notify(event)
             self._dragging = False
             self._index = None
 
@@ -338,7 +353,52 @@ class SplinePlot(wx.Panel):
     def update(self):
         self.plt.set_data(self.spline.x, self.spline.y)
         self.spline_plt.set_data(self.spline.spline_x, self.spline.spline_y)
-        self.canvas.draw()
+
+
+class ColorMapSplinePlot(SplinePlot):
+    def on_button_press(self, event):
+        if event.inaxes:
+            if event.button == 1:
+                for p in self.parent.plots:
+                    if self.GetId() != p.GetId():
+                        p.spline.save_cache()
+                ret = super().on_button_press(event)
+            if event.button == 3:
+                ret = super().on_button_press(event)
+                self.parent.update_implots()
+
+    def add(self, x, y):
+        super().add(x, y)
+        for p in self.parent.plots:
+            if self.GetId() != p.GetId():
+                SplinePlot.add(p, x)
+        self.parent.update_implots()
+
+    def delete(self, idx):
+        super().delete(idx)
+        for p in self.parent.plots:
+            if self.GetId() != p.GetId():
+                SplinePlot.delete(p, idx)
+        self.parent.update_implots()
+
+    def on_motion_notify(self, event):
+        res = super().on_motion_notify(event)
+        if res is not None:
+            idx, x, y = res
+            for p in self.parent.plots:
+                if self.GetId() != p.GetId():
+                    p.spline.move(idx, x)
+                    p.update()
+            self.parent.update_implots()
+
+    def on_figure_leave(self, event):
+        if self._dragging:
+            for p in self.parent.plots:
+                if self.GetId() != p.GetId():
+                    if p.spline.load_cache():
+                        p.update()
+            super().on_figure_leave(event)
+            self.parent.update_implots()
 
 
 class ColorMapControlPlots(wx.Panel):
@@ -356,9 +416,17 @@ class ColorMapControlPlots(wx.Panel):
         self.cmap = ColorMap(x, colors)
 
         self.plots = [
-            SplinePlot(self, self.cmap.splines[0], ylabel='lightness'),
-            SplinePlot(self, self.cmap.splines[1], ylabel='green-red'),
-            SplinePlot(self, self.cmap.splines[2], ylabel='blue-yellow')]
+            ColorMapSplinePlot(self, self.cmap.splines[0], ylabel='lightness'),
+            ColorMapSplinePlot(self, self.cmap.splines[1], ylabel='green-red'),
+            ColorMapSplinePlot(self, self.cmap.splines[2], ylabel='blue-yellow')]
+
+        self.implots = []
+        for imdata, plot in zip(self.cmap.imdata(), self.plots):
+            extent = list(plot.axes.get_xlim()) + list(plot.axes.get_ylim())
+            self.implots.append(plot.axes.imshow(imdata, extent=extent,
+                                                 origin='lower', aspect='auto',
+                                                 zorder=-1,
+                                                 interpolation='gaussian'))
 
         self.layout()
 
@@ -370,10 +438,15 @@ class ColorMapControlPlots(wx.Panel):
         self.SetSizer(vbox)
         self.Layout()
 
+    def update_implots(self):
+        for im, data in zip(self.implots, self.cmap.imdata()):
+            im.set_array(data)
+            im.figure.canvas.draw()
+
 
 class MainFrame(wx.Frame):
     def __init__(self):
-        super().__init__(None, wx.ID_ANY, 'Main Window', size=(500, 500))
+        super().__init__(None, wx.ID_ANY, 'Main Window', size=(500, 600))
         self.cmapctl = ColorMapControlPlots(self)
         self.layout()
 

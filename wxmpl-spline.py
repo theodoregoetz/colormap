@@ -143,7 +143,9 @@ class BoundedSpline(OrderedBoundedPoints):
 
 class ColorMap(object):
     def __init__(self, x, colors,
-                 delta_e=color.deltaE_ciede94, smoothing=50, npoints=256,
+                 delta_e=color.deltaE_ciede94,
+                 smoothing=0,
+                 npoints=256,
                  imdim=(40, 64)):
         self.x = x
         self.colors = np.asarray(colors).reshape(3, -1)
@@ -160,12 +162,10 @@ class ColorMap(object):
         ncorrpoints = 100
         self._xx = np.linspace(0, 1, ncorrpoints)
         self._colors_uncorr = np.empty((ncorrpoints, 3))
-        self._colors_corr = np.empty((ncorrpoints, 3))
         for i in (0, 1, 2):
             self._update_uncorrected_colors(i)
 
         self._update_x_spline()
-        self._update_corrected_colors()
 
         self._cmap_x = np.linspace(0, 1, self.npoints)
         self._cmap_colors = np.empty((npoints, 1, 3))
@@ -196,17 +196,10 @@ class ColorMap(object):
             self._x_spline = interpolate.UnivariateSpline(de_csum, self._xx[1:],
                                                           s=self.smoothing)
 
-    def _update_corrected_colors(self):
-        for i, s in enumerate(self.splines):
-            self._colors_corr[..., i] = s(self._x_spline(self._xx))
-
-    def update_corrected_colors(self):
+    def update(self):
+        for i in (0,1,2):
+            self._update_uncorrected_colors(i)
         self._update_x_spline()
-        self._update_corrected_colors()
-
-    def update_channel(self, i):
-        self._update_uncorrected_colors(i)
-        self.update_corrected_colors()
 
     def rgb(self):
         for i, s in enumerate(self.splines):
@@ -218,7 +211,7 @@ class ColorMap(object):
     def imdata(self):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            x = self._x_spline(self._imx)
+            x = self._imx
             l = self.splines[0](x)
             a = self.splines[1](x)
             b = self.splines[2](x)
@@ -258,7 +251,7 @@ class SplinePlot(wx.Panel):
         self.axes.set_xlabel(xlabel)
         self.axes.set_ylabel(ylabel)
 
-        tol = 0.005
+        tol = 0.02
         dx = tol * (self.spline.xmax - self.spline.xmin)
         dy = tol * (self.spline.ymax - self.spline.ymin)
         self.axes.set_xlim(self.spline.xmin - dx, self.spline.xmax + dx)
@@ -270,7 +263,6 @@ class SplinePlot(wx.Panel):
 
         self.plt, = self.axes.plot(self.spline.x, self.spline.y,
                                    linestyle='none', marker='o', color='black')
-
 
         self.spline_plt, = self.axes.plot(self.spline.spline_x,
                                           self.spline.spline_y, color='black')
@@ -347,7 +339,7 @@ class SplinePlot(wx.Panel):
         ipick, xpick, ypick = self.spline.pick(event.xdata, event.ydata)
         xpx, ypx = self.axes.transData.transform((xpick, ypick))
         distsq = (xpx - event.x)**2 + (ypx - event.y)**2
-        if distsq < 15**2:
+        if distsq < 20**2:
             return ipick
 
     def update(self):
@@ -401,9 +393,50 @@ class ColorMapSplinePlot(SplinePlot):
             self.parent.update_implots()
 
 
+class DECorrPlot(wx.Panel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.parent = parent
+        self.init_canvas()
+        self.layout()
+
+    def init_canvas(self):
+        xdpi, ydpi = wx.ScreenDC().GetPPI()
+        self.figure = Figure(figsize=(1, 1), dpi=xdpi, tight_layout=True,
+                             subplotpars=SubplotParams(left=0.01, right=0.99,
+                                                       bottom=0.01, top=0.99))
+        self.axes = self.figure.add_subplot(1,1,1)
+
+        self.axes.set_xlabel(r'uncorrected')
+        self.axes.set_ylabel(r'corrected')
+
+        self.axes.set_xlim(0, 1)
+        self.axes.set_ylim(-0.1, 1.1)
+        self.axes.autoscale(False)
+        self.axes.xaxis.set_ticks([0,0.5,1])
+        self.axes.yaxis.set_ticks([0,0.5,1])
+
+        self._x = np.linspace(0, 1, 300)
+        self.plot, = self.axes.plot((0,1), (0,1), color='black')
+
+        self.canvas = Canvas(self, wx.ID_ANY, self.figure)
+        self.update(lambda x: x)
+
+    def layout(self):
+        vbox = wx.BoxSizer(wx.VERTICAL)
+        vbox.Add(self.canvas, 1, wx.ALL | wx.EXPAND, 0)
+        self.SetSizerAndFit(vbox)
+        self.Layout()
+
+    def update(self, spline):
+        self.plot.set_data(self._x, spline(self._x))
+        self.canvas.draw()
+
+
 class ColorMapControlPlots(wx.Panel):
     def __init__(self, parent):
         super().__init__(parent)
+        # Macaw
         colors = np.array(
             [[ 12,   0,   0],
              [ 57, -37,  -2],
@@ -412,6 +445,29 @@ class ColorMapControlPlots(wx.Panel):
              [ 72,  18,  76],
              [ 81,   0,   0],
              [ 99,   0,   0]]).transpose()
+        # Test
+        colors = np.array(
+            [[ 50,   0,   0],
+             [ 50,   0,   0],
+             [ 50,   0,   0],
+             [ 50,   0,   0],
+             [  0,   0,   0],
+             [ 50,   0,   0],
+             [ 50,   0,   0],
+             [ 50,   0,   0],
+             [ 50,   0,   0],
+             [100,   0,   0],
+             [ 50,   0,   0],
+             [ 50,   0,   0],
+             [ 50,   0,   0],
+             [ 50,   0,   0]]).transpose()
+        # Test
+        colors = np.array(
+            [[  0,  50,   0],
+             [ 50,  50,   0],
+             [100,   0,  50],
+             [ 50, -50,  50],
+             [  0, -50,  50]]).transpose()
         x = np.linspace(0, 1, len(colors[0]))
         self.cmap = ColorMap(x, colors)
 
@@ -428,32 +484,46 @@ class ColorMapControlPlots(wx.Panel):
                                                  zorder=-1,
                                                  interpolation='gaussian'))
 
+        self.de_corr_plot = DECorrPlot(self)
+        self.de_corr_plot.update(self.cmap._x_spline)
+
         self.layout()
 
     def layout(self):
+        hbox = wx.BoxSizer(wx.HORIZONTAL)
+
         vbox = wx.BoxSizer(wx.VERTICAL)
         vbox.Add(self.plots[0], 1, wx.ALL | wx.EXPAND)
         vbox.Add(self.plots[1], 1, wx.ALL | wx.EXPAND)
         vbox.Add(self.plots[2], 1, wx.ALL | wx.EXPAND)
-        self.SetSizer(vbox)
+        hbox.Add(vbox, 2, wx.ALL | wx.EXPAND)
+
+        vbox = wx.BoxSizer(wx.VERTICAL)
+        vbox.Add(self.de_corr_plot, 1, wx.ALL | wx.EXPAND)
+        vbox.Add(wx.Panel(self), 1, wx.ALL | wx.EXPAND)
+        hbox.Add(vbox, 1, wx.ALL | wx.EXPAND)
+
+        self.SetSizer(hbox)
         self.Layout()
 
     def update_implots(self):
         for im, data in zip(self.implots, self.cmap.imdata()):
             im.set_array(data)
             im.figure.canvas.draw()
+        self.cmap.update()
+        self.de_corr_plot.update(self.cmap._x_spline)
 
 
 class MainFrame(wx.Frame):
     def __init__(self):
-        super().__init__(None, wx.ID_ANY, 'Main Window', size=(500, 600))
+        super().__init__(None, wx.ID_ANY, 'Main Window', size=(750, 600))
         self.cmapctl = ColorMapControlPlots(self)
         self.layout()
 
     def layout(self):
-        vbox = wx.BoxSizer(wx.VERTICAL)
-        vbox.Add(self.cmapctl, 1, wx.ALL | wx.EXPAND)
-        self.SetSizer(vbox)
+        hbox = wx.BoxSizer(wx.HORIZONTAL)
+        hbox.Add(self.cmapctl, 1, wx.ALL | wx.EXPAND)
+        self.SetSizer(hbox)
         self.Layout()
 
 

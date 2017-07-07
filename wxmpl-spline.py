@@ -357,21 +357,21 @@ class ColorMapSplinePlot(SplinePlot):
                 ret = super().on_button_press(event)
             if event.button == 3:
                 ret = super().on_button_press(event)
-                self.parent.update_implots()
+                self.parent.update()
 
     def add(self, x, y):
         super().add(x, y)
         for p in self.parent.plots:
             if self.GetId() != p.GetId():
                 SplinePlot.add(p, x)
-        self.parent.update_implots()
+        self.parent.update()
 
     def delete(self, idx):
         super().delete(idx)
         for p in self.parent.plots:
             if self.GetId() != p.GetId():
                 SplinePlot.delete(p, idx)
-        self.parent.update_implots()
+        self.parent.update()
 
     def on_motion_notify(self, event):
         res = super().on_motion_notify(event)
@@ -381,7 +381,7 @@ class ColorMapSplinePlot(SplinePlot):
                 if self.GetId() != p.GetId():
                     p.spline.move(idx, x)
                     p.update()
-            self.parent.update_implots()
+            self.parent.update()
 
     def on_figure_leave(self, event):
         if self._dragging:
@@ -390,7 +390,7 @@ class ColorMapSplinePlot(SplinePlot):
                     if p.spline.load_cache():
                         p.update()
             super().on_figure_leave(event)
-            self.parent.update_implots()
+            self.parent.update()
 
 
 class DECorrPlot(wx.Panel):
@@ -446,28 +446,28 @@ class ColorMapControlPlots(wx.Panel):
              [ 81,   0,   0],
              [ 99,   0,   0]]).transpose()
         # Test
-        colors = np.array(
-            [[ 50,   0,   0],
-             [ 50,   0,   0],
-             [ 50,   0,   0],
-             [ 50,   0,   0],
-             [  0,   0,   0],
-             [ 50,   0,   0],
-             [ 50,   0,   0],
-             [ 50,   0,   0],
-             [ 50,   0,   0],
-             [100,   0,   0],
-             [ 50,   0,   0],
-             [ 50,   0,   0],
-             [ 50,   0,   0],
-             [ 50,   0,   0]]).transpose()
-        # Test
-        colors = np.array(
-            [[  0,  50,   0],
-             [ 50,  50,   0],
-             [100,   0,  50],
-             [ 50, -50,  50],
-             [  0, -50,  50]]).transpose()
+        #colors = np.array(
+        #    [[ 50,   0,   0],
+        #     [ 50,   0,   0],
+        #     [ 50,   0,   0],
+        #     [ 50,   0,   0],
+        #     [  0,   0,   0],
+        #     [ 50,   0,   0],
+        #     [ 50,   0,   0],
+        #     [ 50,   0,   0],
+        #     [ 50,   0,   0],
+        #     [100,   0,   0],
+        #     [ 50,   0,   0],
+        #     [ 50,   0,   0],
+        #     [ 50,   0,   0],
+        #     [ 50,   0,   0]]).transpose()
+        ## Test
+        #colors = np.array(
+        #    [[  0,  50,   0],
+        #     [ 50,  50,   0],
+        #     [100,   0,  50],
+        #     [ 50, -50,  50],
+        #     [  0, -50,  50]]).transpose()
         x = np.linspace(0, 1, len(colors[0]))
         self.cmap = ColorMap(x, colors)
 
@@ -500,13 +500,13 @@ class ColorMapControlPlots(wx.Panel):
 
         vbox = wx.BoxSizer(wx.VERTICAL)
         vbox.Add(self.de_corr_plot, 1, wx.ALL | wx.EXPAND)
-        vbox.Add(wx.Panel(self), 1, wx.ALL | wx.EXPAND)
+        vbox.Add(wx.Panel(self), 2, wx.ALL | wx.EXPAND)
         hbox.Add(vbox, 1, wx.ALL | wx.EXPAND)
 
-        self.SetSizer(hbox)
+        self.SetSizerAndFit(hbox)
         self.Layout()
 
-    def update_implots(self):
+    def update(self):
         for im, data in zip(self.implots, self.cmap.imdata()):
             im.set_array(data)
             im.figure.canvas.draw()
@@ -519,6 +519,8 @@ class MainFrame(wx.Frame):
         super().__init__(None, wx.ID_ANY, 'Main Window', size=(750, 600))
         self.cmapctl = ColorMapControlPlots(self)
         self.layout()
+
+        self.cmapctl.update()
 
     def layout(self):
         hbox = wx.BoxSizer(wx.HORIZONTAL)

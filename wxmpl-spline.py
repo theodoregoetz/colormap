@@ -7,6 +7,7 @@ import wx
 
 from copy import copy
 from matplotlib.backends.backend_wxagg import FigureCanvasWxAgg as Canvas
+from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.figure import Figure, SubplotParams
 from numpy import random as rand
 from scipy import interpolate
@@ -175,8 +176,7 @@ class ColorMap(object):
         self._bb = np.linspace(-128, 128, self.imdim[1]).reshape((-1,1))
         self._imx = np.linspace(0, 1, self.imdim[0])
         self._labdata = np.empty((3, self.imdim[1], self.imdim[0], 3))
-        self._rgbadata = np.empty((3, self.imdim[1], self.imdim[0], 4), dtype=np.uint8)
-        self._rgbadata[:, :, :, 3] = 0xff
+        self._rgbdata = np.empty((3, self.imdim[1], self.imdim[0], 3), dtype=np.uint8)
 
         self._labdata[0, :, :, 0] = self._ll
         self._labdata[1, :, :, 1] = self._aa
@@ -218,17 +218,17 @@ class ColorMap(object):
 
             self._labdata[0, :, :, 1] = a
             self._labdata[0, :, :, 2] = b
-            self._rgbadata[0, :, :, :-1] = (color.lab2rgb(self._labdata[0]) * 0xff).astype(np.uint8)
+            self._rgbdata[0, :, :, :] = (color.lab2rgb(self._labdata[0]) * 0xff).astype(np.uint8)
 
             self._labdata[1, :, :, 0] = l
             self._labdata[1, :, :, 2] = b
-            self._rgbadata[1, :, :, :-1] = (color.lab2rgb(self._labdata[1]) * 0xff).astype(np.uint8)
+            self._rgbdata[1, :, :, :] = (color.lab2rgb(self._labdata[1]) * 0xff).astype(np.uint8)
 
             self._labdata[2, :, :, 0] = l
             self._labdata[2, :, :, 1] = a
-            self._rgbadata[2, :, :, :-1] = (color.lab2rgb(self._labdata[2]) * 0xff).astype(np.uint8)
+            self._rgbdata[2, :, :, :] = (color.lab2rgb(self._labdata[2]) * 0xff).astype(np.uint8)
 
-            return self._rgbadata
+            return self._rgbdata
 
 
 class SplinePlot(wx.Panel):
@@ -339,7 +339,7 @@ class SplinePlot(wx.Panel):
         ipick, xpick, ypick = self.spline.pick(event.xdata, event.ydata)
         xpx, ypx = self.axes.transData.transform((xpick, ypick))
         distsq = (xpx - event.x)**2 + (ypx - event.y)**2
-        if distsq < 20**2:
+        if distsq < 40**2:
             return ipick
 
     def update(self):
@@ -433,6 +433,42 @@ class DECorrPlot(wx.Panel):
         self.canvas.draw()
 
 
+class CombPlot(wx.Panel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.parent = parent
+        self.init_canvas()
+        self.layout()
+
+    def init_canvas(self):
+        xdpi, ydpi = wx.ScreenDC().GetPPI()
+        self.figure = Figure(figsize=(1, 1), dpi=xdpi, tight_layout=True,
+                             subplotpars=SubplotParams(left=0.01, right=0.99,
+                                                       bottom=0.01, top=0.99))
+        self.axes = self.figure.add_subplot(1,1,1)
+
+        nperiods, npoints, amplitude = 80, 50, 70
+        x = np.linspace(0, nperiods * 2 * np.pi, npoints * nperiods)
+        y = np.linspace(0, amplitude, npoints * 10)
+        X, Y = np.meshgrid(x, y)
+        img = X +  Y * np.sin(X) * (Y**2 / Y.max()**2)
+        self.plot = self.axes.imshow(img, origin='lower', aspect='auto',
+                                     vmin=x[0], vmax=x[-1])
+        self.axes.set_axis_off()
+
+        self.canvas = Canvas(self, wx.ID_ANY, self.figure)
+
+    def layout(self):
+        vbox = wx.BoxSizer(wx.VERTICAL)
+        vbox.Add(self.canvas, 1, wx.ALL | wx.EXPAND, 0)
+        self.SetSizerAndFit(vbox)
+        self.Layout()
+
+    def update(self, cmap):
+        self.plot.set_cmap(LinearSegmentedColormap.from_list('_', cmap.rgb()))
+        self.canvas.draw()
+
+
 class ColorMapControlPlots(wx.Panel):
     def __init__(self, parent):
         super().__init__(parent)
@@ -487,23 +523,32 @@ class ColorMapControlPlots(wx.Panel):
         self.de_corr_plot = DECorrPlot(self)
         self.de_corr_plot.update(self.cmap._x_spline)
 
+        self.comb_plot = CombPlot(self)
+        self.comb_plot.update(self.cmap)
+
         self.layout()
 
     def layout(self):
-        hbox = wx.BoxSizer(wx.HORIZONTAL)
 
-        vbox = wx.BoxSizer(wx.VERTICAL)
-        vbox.Add(self.plots[0], 1, wx.ALL | wx.EXPAND)
-        vbox.Add(self.plots[1], 1, wx.ALL | wx.EXPAND)
-        vbox.Add(self.plots[2], 1, wx.ALL | wx.EXPAND)
-        hbox.Add(vbox, 2, wx.ALL | wx.EXPAND)
+        vbox0 = wx.BoxSizer(wx.VERTICAL)
 
-        vbox = wx.BoxSizer(wx.VERTICAL)
-        vbox.Add(self.de_corr_plot, 1, wx.ALL | wx.EXPAND)
-        vbox.Add(wx.Panel(self), 2, wx.ALL | wx.EXPAND)
-        hbox.Add(vbox, 1, wx.ALL | wx.EXPAND)
+        hbox0 = wx.BoxSizer(wx.HORIZONTAL)
 
-        self.SetSizerAndFit(hbox)
+        vbox1 = wx.BoxSizer(wx.VERTICAL)
+        vbox1.Add(self.plots[0], 1, wx.ALL | wx.EXPAND)
+        vbox1.Add(self.plots[1], 1, wx.ALL | wx.EXPAND)
+        vbox1.Add(self.plots[2], 1, wx.ALL | wx.EXPAND)
+        hbox0.Add(vbox1, 2, wx.ALL | wx.EXPAND)
+
+        vbox2 = wx.BoxSizer(wx.VERTICAL)
+        vbox2.Add(self.de_corr_plot, 1, wx.ALL | wx.EXPAND)
+        vbox2.Add(wx.Panel(self), 2, wx.ALL | wx.EXPAND)
+        hbox0.Add(vbox2, 1, wx.ALL | wx.EXPAND)
+
+        vbox0.Add(hbox0, 3, wx.ALL | wx.EXPAND)
+        vbox0.Add(self.comb_plot, 1, wx.ALL | wx.EXPAND)
+
+        self.SetSizerAndFit(vbox0)
         self.Layout()
 
     def update(self):
@@ -512,6 +557,7 @@ class ColorMapControlPlots(wx.Panel):
             im.figure.canvas.draw()
         self.cmap.update()
         self.de_corr_plot.update(self.cmap._x_spline)
+        self.comb_plot.update(self.cmap)
 
 
 class MainFrame(wx.Frame):
